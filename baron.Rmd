@@ -1,0 +1,149 @@
+---
+title: "Data 624 - Project 2"
+author: "Baron Curtin"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    toc: true
+    theme: cayman
+    highlight: github
+    df_print: paged
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(tidy = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+
+libs <- c("tidyverse", "readxl", "caret", "mlbench", 'skimr', 'RANN', 'randomForest', 'fastAdaboost', 'gbm', 'xgboost', 'caretEnsemble', 'C50', 'earth')
+
+loadPkg <- function(x) {
+  if(!require(x, character.only = T)) install.packages(x, dependencies = T, repos = "http://cran.us.r-project.org")
+  require(x, character.only = T)
+}
+lapply(libs, loadPkg)
+```
+
+
+## Load Data
+```{r}
+# test for blanks
+replace_with_na <- function(x, str_to_replace) {
+  if(x == str_to_replace && !is.na(x)) {
+    return(NA)
+  } else {
+    return(x)
+  }
+}
+
+train <- read_xlsx("StudentData.xlsx") %>%
+  mutate(`Brand Code` = as.factor(`Brand Code`)) %>%
+  mutate_all(replace_with_na, str_to_replace = "")
+
+test <- read_xlsx("StudentEvaluation- TO PREDICT.xlsx") %>%
+  mutate(`Brand Code` = as.factor(`Brand Code`)) %>%
+  mutate_all(replace_with_na, str_to_replace = "")
+
+trainX <- train %>%
+  select(-PH)
+trainY <- train$PH
+
+testX <- test %>%
+  select(-PH)
+testY <- test$PH
+
+set.seed(7)
+```
+
+## Exploratory Analysis
+```{r}
+library(skimr)
+skimmed <- skim_to_wide(train)
+skimmed[, c(1:5, 9:11, 13, 15:16)]
+```
+
+## Preprocessing
+```{r}
+# one hot encoding
+dummyModel <- dummyVars(PH ~ ., data = train)
+trainDataDummy <- predict(dummyModel, newdata = train)
+
+trainData <- data.frame(trainDataDummy) %>%
+  rename_all(str_replace_all, pattern = "X.", replacement = "") %>%
+  rename_all(str_replace_all, pattern = "\\.$", replacement = "")
+
+# show structure
+str(trainData)
+```
+
+```{r}
+# imputation
+processMissing <- preProcess(trainData, method='knnImpute')
+processMissing
+
+library(RANN)
+trainData <- predict(processMissing, newdata = trainData)
+anyNA(trainData)
+
+summary(trainData)
+```
+
+
+```{r}
+# re-add PH variable
+trainData$PH <- trainY
+```
+
+
+## Feature Elimination 
+```{r}
+subsets <- c(20:25)
+ctrl <- rfeControl(functions = rfFuncs,
+                   method = "repeatedcv",
+                   repeats = 5,
+                   verbose = FALSE)
+
+lmProfile <- rfe(x=trainData[, 1:35], y=trainData$PH,
+                 sizes = subsets,
+                 rfeControl = ctrl)
+
+lmProfile
+```
+
+```{r}
+# best variables for optimal performance
+bestVars <- lmProfile$optVariables
+```
+
+
+## Model Fit
+```{r}
+library(caret)
+rf_model <- train(as.formula(paste("PH ~ ", paste(bestVars, collapse = " + "), sep = "")), data=trainData, method='rf')
+```
+
+```{r}
+# predictions
+train_predictions <- predict(rf)
+```
+
+## Test Data Processing
+```{r}
+# imputation
+testData <- predict(processMissing, newData = test)
+
+# one hot encoding
+testData <- predict(dummyModel, newData = testData)
+```
+
+## Test Data Predictions
+```{r}
+test_predictions <- predict(rf, testData)
+```
+
+
+
+
+
+
+
