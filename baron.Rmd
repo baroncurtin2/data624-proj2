@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(tidy = TRUE)
 knitr::opts_chunk$set(warning = FALSE)
 
-libs <- c("tidyverse", "readxl", "caret", "mlbench", 'skimr', 'RANN', 'randomForest', 'fastAdaboost', 'gbm', 'xgboost', 'caretEnsemble', 'C50', 'earth', 'DMwR')
+libs <- c("tidyverse", "readxl", "caret", "mlbench", 'skimr', 'RANN', 'randomForest', 'fastAdaboost', 'gbm', 'xgboost', 'caretEnsemble', 'C50', 'earth', 'DMwR', 'fBasics')
 
 loadPkg <- function(x) {
   if(!require(x, character.only = T)) install.packages(x, dependencies = T, repos = "http://cran.us.r-project.org")
@@ -38,7 +38,8 @@ replace_with_na <- function(x, str_to_replace) {
 
 train <- read_xlsx("StudentData.xlsx") %>%
   mutate(`Brand Code` = as.factor(`Brand Code`)) %>%
-  mutate_all(replace_with_na, str_to_replace = "")
+  mutate_all(replace_with_na, str_to_replace = "") %>%
+  drop_na()
 
 test <- read_xlsx("StudentEvaluation- TO PREDICT.xlsx") %>%
   mutate(`Brand Code` = as.factor(`Brand Code`)) %>%
@@ -56,6 +57,27 @@ set.seed(7)
 ```
 
 ## Exploratory Analysis
+```{r}
+glimpse(train)
+```
+
+
+```{r}
+summary(train)
+```
+
+```{r}
+train %>%
+  group_by(`Brand Code`) %>%
+  summarise(count = n(), percent = count/nrow(train))
+```
+
+```{r}
+basicStats(select_if(train, is.numeric))[c("nobs", "NAs", "Minimum", "Maximum", "1. Quartile", "3. Quartile", "Mean", "Median", "Variance", "Stdev", "Skewness", "Kurtosis"),]
+```
+
+
+
 ```{r}
 library(skimr)
 skimmed <- skim_to_wide(train)
@@ -95,17 +117,9 @@ trainData$PH <- trainY
 summary(trainData)
 ```
 
-```{r}
-# categorical imputation
-library(DMwR)
-trainData <- knnImputation(trainData)
-```
-
-
-
 ## Feature Elimination 
 ```{r}
-subsets <- c(1,10,20,30,35)
+subsets <- c(1:5,10,20,30,35)
 ctrl <- rfeControl(functions = rfFuncs,
                    method = "repeatedcv",
                    repeats = 5,
@@ -125,13 +139,33 @@ bestVars <- lmProfile$optVariables
 
 
 ## Model Fit
-```{r}
+```{r, results='hide'}
 library(caret)
 rf_model <- train(as.formula(paste("PH ~ ", paste(bestVars, collapse = " + "), sep = "")), data=trainData, method='rf')
 cubist_model <- train(as.formula(paste("PH ~ ", paste(bestVars, collapse = " + "), sep = "")), data=trainData, method='cubist')
 gbm_model <- train(as.formula(paste("PH ~ ", paste(bestVars, collapse = " + "), sep = "")), data=trainData, method='gbm')
 nnet_model <- train(as.formula(paste("PH ~ ", paste(bestVars, collapse = " + "), sep = "")), data=trainData, method='nnet')
 ```
+
+```{r}
+# summary of models
+summary(rf_model)
+```
+
+```{r}
+summary(cubist_model)
+```
+
+
+```{r}
+summary(gbm_model)
+```
+
+
+```{r}
+summary(nnet_model)
+```
+
 
 ```{r}
 # predictions
@@ -144,14 +178,19 @@ nnet_predictions <- predict(nnet_model)
 ## Test Data Processing
 ```{r}
 # imputation
-testData <- predict(processMissing, newData = test)
+library(RANN)
+testData <- predict(processMissing, newdata = test)
 
 # one hot encoding
-testData <- predict(dummyModel, newData = testData)
+testDataDummy <- predict(dummyModel, newdata = testData)
+testData <- data.frame(testDataDummy) %>%
+  rename_all(str_replace_all, pattern = "X.", replacement = "") %>%
+  rename_all(str_replace_all, pattern = "\\.$", replacement = "")
 
 # impute catgorical vars
 library(DMwR)
 testData <- knnImputation(testData)
+
 ```
 
 ## Test Data Predictions
